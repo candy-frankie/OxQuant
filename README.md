@@ -1,12 +1,9 @@
 # OxQuant - Next-Generation AI Quantitative Trading Platform
 
-## 🚀 Vision
+## 🚀 Overview
 OxQuant is a cutting-edge AI-powered quantitative trading platform that combines traditional quantitative finance with modern machine learning techniques. The platform enables systematic trading strategy development, backtesting, risk management, and live trading across multiple asset classes.
 
-## 🎯 Positioning
-**OxQuant: The AI-First Quantitative Trading Platform for the Next Decade**
-
-## ✨ Key Features
+## ✨ Features
 - **AI-Driven Strategy Development**: Leverage LLMs for strategy ideation and code generation
 - **Multi-Asset Support**: Equities, Futures, Options, Crypto, Forex
 - **High-Performance Backtesting**: GPU-accelerated simulation engine
@@ -15,7 +12,7 @@ OxQuant is a cutting-edge AI-powered quantitative trading platform that combines
 - **Research Environment**: Jupyter notebooks with pre-built templates
 - **Collaboration Tools**: Team workflow management and version control
 
-## 🏗️ Architecture Overview
+## 🏗️ Architecture
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                     OxQuant Platform                        │
@@ -38,6 +35,51 @@ OxQuant is a cutting-edge AI-powered quantitative trading platform that combines
 │  • Model Serving         │  • Security & Compliance        │
 └─────────────────────────────────────────────────────────────┘
 ```
+
+## 🚀 Quick Start
+
+### Prerequisites
+- Python 3.11+
+- Docker & Docker Compose
+- Git
+
+### Installation
+
+1. **Clone the repository**
+   ```bash
+   git clone https://github.com/candy-frankie/OxQuant.git
+   cd OxQuant
+   ```
+
+2. **Setup with Docker (Recommended)**
+   ```bash
+   # Copy environment file
+   cp .env.example .env
+   
+   # Start database services
+   docker-compose up -d postgres redis
+   
+   # Install Python dependencies
+   pip install -r requirements.txt
+   
+   # Start API server
+   docker-compose up api
+   ```
+
+3. **Or setup locally**
+   ```bash
+   # Run setup script
+   python setup.py
+   
+   # Start services
+   docker-compose up -d
+   ```
+
+### Access Services
+- **API Documentation**: http://localhost:8000/docs
+- **Jupyter Notebooks**: http://localhost:8888 (password: oxquant)
+- **PostgreSQL**: localhost:5432 (user: postgres, password: postgres)
+- **Redis**: localhost:6379
 
 ## 📁 Project Structure
 ```
@@ -64,56 +106,59 @@ oxquant/
 - **Infra**: Docker, Kubernetes, Terraform, Prometheus
 - **Brokers**: Interactive Brokers, Alpaca, Binance, etc.
 
-## 🚦 Getting Started
-```bash
-# Clone repository
-git clone https://github.com/candy-frankie/OxQuant.git
-cd OxQuant
+## 📈 Example Strategy
 
-# Setup with Docker
-docker-compose up -d
+```python
+from src.strategies.examples import MovingAverageCrossover
+import pandas as pd
+import numpy as np
 
-# Or setup locally
-pip install -e ".[dev]"
-python src/scripts/setup.py
+# Generate sample data
+dates = pd.date_range('2023-01-01', '2023-12-31', freq='D')
+prices = 100 + np.cumsum(np.random.randn(len(dates)) * 0.5)
+data = pd.DataFrame({'close': prices}, index=dates)
+
+# Create and run strategy
+strategy = MovingAverageCrossover(short_window=10, long_window=30)
+result = strategy.generate_signals(data)
+
+print(f"Total Return: {result.metrics['total_return']:.2%}")
+print(f"Sharpe Ratio: {result.metrics['sharpe_ratio']:.2f}")
+print(f"Max Drawdown: {result.metrics['max_drawdown']:.2%}")
 ```
 
-## 📈 Roadmap
-### Phase 1: Foundation (Q2 2024)
-- [ ] Core engine architecture
-- [ ] Basic backtesting framework
-- [ ] Market data pipeline
-- [ ] Web dashboard MVP
+## 🔧 Development
 
-### Phase 2: AI Integration (Q3 2024)
-- [ ] LLM-powered strategy generation
-- [ ] Automated feature engineering
-- [ ] Model training pipeline
-- [ ] Paper trading integration
+### Running Tests
+```bash
+pytest tests/
+```
 
-### Phase 3: Production Ready (Q4 2024)
-- [ ] Multi-broker execution
-- [ ] Advanced risk management
-- [ ] Team collaboration features
-- [ ] Enterprise security
+### Code Formatting
+```bash
+black src/
+isort src/
+flake8 src/
+```
 
-### Phase 4: Scale & Expand (2025)
-- [ ] Alternative data integration
-- [ ] Cross-asset optimization
-- [ ] Cloud-native deployment
-- [ ] Marketplace for strategies
+### Database Migrations
+```bash
+# Initialize database
+python -c "from src.core.database import init_db; import asyncio; asyncio.run(init_db())"
+```
 
-## 👥 Contributing
-We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+## 🤝 Contributing
+Please read [CONTRIBUTING.md](CONTRIBUTING.md) for details on our code of conduct and the process for submitting pull requests.
 
 ## 📄 License
-Apache 2.0 - See [LICENSE](LICENSE) for details.
+This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENSE) file for details.
 
-## 🔗 Links
-- [Documentation](https://docs.oxquant.ai)
-- [API Reference](https://api.oxquant.ai/docs)
-- [Community Discord](https://discord.gg/oxquant)
-- [Twitter](https://twitter.com/oxquant)
+## 📞 Support
+- **Issues**: [GitHub Issues](https://github.com/candy-frankie/OxQuant/issues)
+- **Email**: 644743502@qq.com
 
----
-*Built with ❤️ by quantitative researchers and AI engineers*
+## 🚀 Roadmap
+- [x] Phase 1: Core architecture and basic backtesting
+- [ ] Phase 2: AI integration and strategy generation
+- [ ] Phase 3: Multi-broker execution and risk management
+- [ ] Phase 4: Enterprise features and scaling
