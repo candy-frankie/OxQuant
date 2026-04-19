@@ -1,0 +1,32 @@
+# Dockerfile for OxQuant Web Dashboard
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    gcc \
+    g++ \
+    libpq-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Poetry
+RUN pip install poetry==1.7.0
+
+# Copy dependency files
+COPY pyproject.toml poetry.lock* ./
+
+# Configure Poetry to not create virtual environment
+RUN poetry config virtualenvs.create false
+
+# Install dependencies (including streamlit)
+RUN poetry install --no-dev --no-interaction --no-ansi
+
+# Copy application code
+COPY src/ ./src/
+
+# Expose port
+EXPOSE 8501
+
+# Run Streamlit app
+CMD ["streamlit", "run", "src/ui/app.py", "--server.port", "8501", "--server.address", "0.0.0.0"]
