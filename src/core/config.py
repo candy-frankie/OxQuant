@@ -64,6 +64,27 @@ class Settings(BaseSettings):
     DEFAULT_INITIAL_CAPITAL: float = 100000.0
     DEFAULT_COMMISSION_RATE: float = 0.001
     
+    # A股市场配置
+    A_STOCK_MARKET_OPEN_TIME: str = "09:30"
+    A_STOCK_MARKET_CLOSE_TIME: str = "15:00"
+    A_STOCK_LUNCH_BREAK_START: str = "11:30"
+    A_STOCK_LUNCH_BREAK_END: str = "13:00"
+    
+    # 数据源配置
+    DATA_SOURCE_AKSHARE_ENABLED: bool = True
+    DATA_SOURCE_TUSHARE_ENABLED: bool = True
+    DATA_SOURCE_BAOSTOCK_ENABLED: bool = True
+    
+    # 交易接口配置
+    TRADING_BROKER: str = "simulation"  # simulation, easytrader, qmt, etc.
+    TRADING_SIMULATION_MODE: bool = True
+    
+    # 风控配置
+    RISK_MAX_POSITION_SIZE_PCT: float = 0.1
+    RISK_MAX_PORTFOLIO_RISK_PCT: float = 0.02
+    RISK_MAX_DRAWDOWN_PCT: float = 0.1
+    RISK_MAX_DAILY_LOSS_PCT: float = 0.05
+    
     class Config:
         env_file = ".env"
         case_sensitive = True

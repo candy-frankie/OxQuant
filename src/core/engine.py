@@ -5,12 +5,13 @@ This module contains the core trading engine components for the OxQuant platform
 """
 
 from abc import ABC, abstractmethod
-from typing import Dict, List, Optional, Any, Union
+from typing import Dict, List, Optional, Any, Union, Tuple
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 import pandas as pd
 import numpy as np
+import uuid
 
 
 class AssetClass(Enum):
@@ -37,6 +38,15 @@ class OrderSide(Enum):
     SELL = "sell"
 
 
+class OrderStatus(Enum):
+    """Order execution status."""
+    PENDING = "pending"
+    FILLED = "filled"
+    PARTIALLY_FILLED = "partially_filled"
+    CANCELLED = "cancelled"
+    REJECTED = "rejected"
+
+
 @dataclass
 class Order:
     """Represents a trading order."""
@@ -49,10 +59,25 @@ class Order:
     time_in_force: str = "day"
     order_id: Optional[str] = None
     timestamp: datetime = None
+    status: OrderStatus = OrderStatus.PENDING
+    filled_quantity: float = 0.0
+    avg_execution_price: Optional[float] = None
     
     def __post_init__(self):
         if self.timestamp is None:
-            self.timestamp = datetime.now()
+            self.timestamp = datetime.now(timezone.utc)
+        if self.order_id is None:
+            self.order_id = f"ORD-{uuid.uuid4().hex[:8]}-{int(self.timestamp.timestamp())}"
+    
+    @property
+    def is_filled(self) -> bool:
+        """Check if order is fully filled."""
+        return self.status == OrderStatus.FILLED
+    
+    @property
+    def remaining_quantity(self) -> float:
+        """Calculate remaining quantity to fill."""
+        return self.quantity - self.filled_quantity
 
 
 @dataclass
@@ -65,18 +90,43 @@ class Position:
     unrealized_pnl: float
     realized_pnl: float = 0.0
     timestamp: datetime = None
+    asset_class: Optional[AssetClass] = None
     
     def __post_init__(self):
         if self.timestamp is None:
-            self.timestamp = datetime.now()
+            self.timestamp = datetime.now(timezone.utc)
     
     @property
     def market_value(self) -> float:
+        """Calculate current market value of position."""
         return self.quantity * self.current_price
     
     @property
     def cost_basis(self) -> float:
+        """Calculate total cost basis."""
         return self.quantity * self.avg_price
+    
+    @property
+    def unrealized_pnl_pct(self) -> float:
+        """Calculate unrealized P&L as percentage of cost basis."""
+        if self.cost_basis == 0:
+            return 0.0
+        return self.unrealized_pnl / self.cost_basis
+    
+    @property
+    def direction(self) -> str:
+        """Return position direction (long/short)."""
+        if self.quantity > 0:
+            return "long"
+        elif self.quantity < 0:
+            return "short"
+        return "flat"
+    
+    def update_price(self, new_price: float):
+        """Update current price and recalculate P&L."""
+        self.current_price = new_price
+        self.unrealized_pnl = (self.current_price - self.avg_price) * self.quantity
+        self.timestamp = datetime.now(timezone.utc)
 
 
 @dataclass
@@ -167,36 +217,78 @@ class BaseStrategy(ABC):
         return orders
 
 
+class ExecutionResult:
+    """Result of order execution."""
+    success: bool
+    order: Order
+    message: str
+    fill_price: float
+    commission: float
+    
+    def __init__(self, success: bool, order: Order, message: str = "", 
+                 fill_price: float = 0.0, commission: float = 0.0):
+        self.success = success
+        self.order = order
+        self.message = message
+        self.fill_price = fill_price
+        self.commission = commission
+
+
 class TradingEngine:
     """Core trading engine that executes strategies."""
     
-    def __init__(self, initial_capital: float = 100000):
+    def __init__(self, initial_capital: float = 100000, commission_rate: float = 0.001):
         self.initial_capital = initial_capital
+        self.commission_rate = commission_rate
         self.portfolio = Portfolio(
             cash=initial_capital,
             positions={},
-            total_value=initial_capital
+            total_value=initial_capital,
+            initial_capital=initial_capital
         )
         self.strategies: Dict[str, BaseStrategy] = {}
         self.order_history: List[Order] = []
         self.trade_history: List[Dict] = []
+        self._equity_history: List[Dict[str, float]] = []
+        self._performance_metrics: List[Dict[str, float]] = []
     
     def register_strategy(self, strategy: BaseStrategy):
         """Register a trading strategy."""
+        if strategy.name in self.strategies:
+            raise ValueError(f"Strategy '{strategy.name}' already registered")
         self.strategies[strategy.name] = strategy
     
-    def execute_order(self, order: Order, market_price: float) -> bool:
+    def unregister_strategy(self, strategy_name: str):
+        """Unregister a trading strategy."""
+        if strategy_name in self.strategies:
+            del self.strategies[strategy_name]
+    
+    def execute_order(self, order: Order, market_price: float) -> ExecutionResult:
         """Execute a trading order."""
+        # Validate order
+        if order.quantity <= 0:
+            order.status = OrderStatus.REJECTED
+            return ExecutionResult(
+                success=False, 
+                order=order,
+                message="Quantity must be positive"
+            )
+        
         # Simulate order execution
         execution_price = market_price
         
         # Calculate cost
         cost = order.quantity * execution_price
-        commission = max(1.0, cost * 0.001)  # 0.1% commission, min $1
+        commission = max(1.0, cost * self.commission_rate)
         
         # Check if we have enough cash for buy orders
         if order.side == OrderSide.BUY and self.portfolio.cash < (cost + commission):
-            return False
+            order.status = OrderStatus.REJECTED
+            return ExecutionResult(
+                success=False, 
+                order=order,
+                message="Insufficient cash"
+            )
         
         # Update portfolio
         symbol = order.symbol
@@ -229,11 +321,21 @@ class TradingEngine:
         
         else:  # SELL order
             if symbol not in self.portfolio.positions:
-                return False
+                order.status = OrderStatus.REJECTED
+                return ExecutionResult(
+                    success=False, 
+                    order=order,
+                    message="No position to sell"
+                )
             
             pos = self.portfolio.positions[symbol]
             if pos.quantity < order.quantity:
-                return False
+                order.status = OrderStatus.REJECTED
+                return ExecutionResult(
+                    success=False, 
+                    order=order,
+                    message="Insufficient quantity to sell"
+                )
             
             # Calculate P&L
             sale_value = order.quantity * execution_price
@@ -252,8 +354,12 @@ class TradingEngine:
                 pos.quantity -= order.quantity
                 pos.unrealized_pnl = (execution_price - pos.avg_price) * pos.quantity
         
+        # Update order status
+        order.status = OrderStatus.FILLED
+        order.filled_quantity = order.quantity
+        order.avg_execution_price = execution_price
+        
         # Record order and trade
-        order.order_id = f"order_{len(self.order_history)}"
         self.order_history.append(order)
         
         trade = {
@@ -263,23 +369,49 @@ class TradingEngine:
             'quantity': order.quantity,
             'price': execution_price,
             'commission': commission,
-            'timestamp': order.timestamp
+            'timestamp': order.timestamp,
+            'realized_pnl': realized_pnl if order.side == OrderSide.SELL else 0.0
         }
         self.trade_history.append(trade)
         
-        return True
+        return ExecutionResult(
+            success=True,
+            order=order,
+            message="Order filled successfully",
+            fill_price=execution_price,
+            commission=commission
+        )
     
-    def run_strategies(self, market_data: Dict[str, pd.DataFrame]) -> List[Order]:
+    def run_strategies(self, market_data: Dict[str, pd.DataFrame]) -> List[ExecutionResult]:
         """Run all registered strategies and generate orders."""
-        all_orders = []
+        results = []
         
         for strategy_name, strategy in self.strategies.items():
             for symbol, data in market_data.items():
                 if len(data) > 0:
                     orders = strategy.run(data, self.portfolio)
-                    all_orders.extend(orders)
+                    for order in orders:
+                        # Get current market price
+                        if 'close' in data.columns:
+                            market_price = data['close'].iloc[-1]
+                            result = self.execute_order(order, market_price)
+                            results.append(result)
         
-        return all_orders
+        # Record portfolio snapshot
+        self._record_portfolio_snapshot()
+        
+        return results
+    
+    def _record_portfolio_snapshot(self):
+        """Record portfolio state for performance tracking."""
+        snapshot = {
+            'timestamp': datetime.now(timezone.utc),
+            'total_value': self.portfolio.total_value,
+            'cash': self.portfolio.cash,
+            'positions_value': self.portfolio.positions_value,
+            'total_return': self.portfolio.total_return
+        }
+        self._equity_history.append(snapshot)
     
     def get_portfolio_metrics(self) -> Dict[str, Any]:
         """Calculate portfolio performance metrics."""
@@ -287,34 +419,36 @@ class TradingEngine:
         total_market_value = sum(pos.market_value for pos in self.portfolio.positions.values())
         
         # Calculate returns
-        total_return = ((self.portfolio.total_value - self.initial_capital) / 
-                       self.initial_capital * 100)
+        total_return = self.portfolio.total_return * 100
         
         # Calculate P&L
         unrealized_pnl = sum(pos.unrealized_pnl for pos in self.portfolio.positions.values())
         realized_pnl = sum(pos.realized_pnl for pos in self.portfolio.positions.values())
         total_pnl = unrealized_pnl + realized_pnl
         
-        # Calculate risk metrics (simplified)
-        if self.trade_history:
-            returns = []
-            for trade in self.trade_history[-20:]:  # Last 20 trades
-                if trade['side'] == 'sell':
-                    returns.append(trade['price'] / 100)  # Simplified
+        # Calculate risk metrics
+        equity_values = [s['total_value'] for s in self._equity_history]
+        if len(equity_values) >= 2:
+            returns = np.diff(equity_values) / equity_values[:-1]
+            volatility = np.std(returns) * np.sqrt(252) * 100
+            sharpe_ratio = (np.mean(returns) / np.std(returns) * np.sqrt(252)) if np.std(returns) > 0 else 0
             
-            if returns:
-                returns_array = np.array(returns)
-                volatility = np.std(returns_array) * np.sqrt(252) * 100  # Annualized
-                sharpe_ratio = (np.mean(returns_array) / np.std(returns_array) * 
-                               np.sqrt(252)) if np.std(returns_array) > 0 else 0
-            else:
-                volatility = 0
-                sharpe_ratio = 0
+            # Calculate max drawdown
+            cumulative = np.array(equity_values) / equity_values[0]
+            running_max = np.maximum.accumulate(cumulative)
+            drawdown = (cumulative - running_max) / running_max
+            max_drawdown = drawdown.min() * 100
         else:
             volatility = 0
             sharpe_ratio = 0
+            max_drawdown = 0
         
-        return {
+        # Calculate win rate
+        winning_trades = sum(1 for t in self.trade_history if t.get('realized_pnl', 0) > 0)
+        total_sell_trades = sum(1 for t in self.trade_history if t['side'] == 'sell')
+        win_rate = (winning_trades / total_sell_trades * 100) if total_sell_trades > 0 else 0
+        
+        metrics = {
             'total_value': self.portfolio.total_value,
             'cash': self.portfolio.cash,
             'positions_value': total_market_value,
@@ -325,8 +459,40 @@ class TradingEngine:
             'total_pnl': total_pnl,
             'volatility_pct': volatility,
             'sharpe_ratio': sharpe_ratio,
-            'num_trades': len(self.trade_history)
+            'max_drawdown_pct': max_drawdown,
+            'win_rate_pct': win_rate,
+            'num_trades': len(self.trade_history),
+            'exposure_pct': self.portfolio.exposure * 100
         }
+        
+        self._performance_metrics.append(metrics)
+        
+        return metrics
+    
+    def get_equity_curve(self) -> pd.Series:
+        """Get equity curve as pandas Series."""
+        if not self._equity_history:
+            return pd.Series()
+        
+        timestamps = [s['timestamp'] for s in self._equity_history]
+        values = [s['total_value'] for s in self._equity_history]
+        return pd.Series(values, index=timestamps)
+    
+    def reset(self):
+        """Reset engine to initial state."""
+        self.portfolio = Portfolio(
+            cash=self.initial_capital,
+            positions={},
+            total_value=self.initial_capital,
+            initial_capital=self.initial_capital
+        )
+        self.order_history = []
+        self.trade_history = []
+        self._equity_history = []
+        self._performance_metrics = []
+        
+        for strategy in self.strategies.values():
+            strategy.reset()
 
 
 class RiskManager:
