@@ -54,3 +54,31 @@ plotly==5.18.0
 
 # Development
 pytest==7.4.0
+# OxQuant Slim Requirements
+# 精简版依赖，仅包含核心功能
+
+# Core dependencies
+fastapi==0.104.0
+uvicorn[standard]==0.24.0
+pydantic==2.5.0
+sqlalchemy==2.0.23
+python-dotenv==1.0.0
+cryptography==41.0.0
+
+# Data processing
+pandas==2.1.0
+numpy==1.26.0
+
+# Machine Learning
+scikit-learn==1.3.0
+
+# Trading libraries
+akshare==1.10.70
+tushare==1.2.89
+quantstats==0.0.62
+
+# Visualization
+plotly==5.18.0
+
+# Development
+pytest==7.4.0

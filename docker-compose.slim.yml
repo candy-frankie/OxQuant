@@ -50,3 +50,29 @@ services:
 
 volumes:
   data:
+# OxQuant - Slim Deployment
+# 简化版部署配置，仅包含核心服务
+
+version: '3.8'
+
+services:
+  # API Server (核心服务)
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    container_name: oxquant-api
+    environment:
+      - ENVIRONMENT=development
+      - DATABASE_URL=sqlite:///./oxquant.db
+      - API_HOST=0.0.0.0
+      - API_PORT=8000
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./src:/app/src
+      - ./data:/app/data
+    command: uvicorn src.api.main:app --host 0.0.0.0 --port 8000 --reload
+
+volumes:
+  data:
