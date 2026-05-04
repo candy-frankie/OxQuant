@@ -75,46 +75,58 @@ OxQuant is a cutting-edge AI-powered quantitative trading platform that combines
 
 ### Prerequisites
 - Python 3.11+
-- Docker & Docker Compose
+- (可选) Docker & Docker Compose
 - Git
 
-### Installation
+### 一键启动（推荐）
 
-1. **Clone the repository**
-   ```bash
-   git clone https://github.com/candy-frankie/OxQuant.git
-   cd OxQuant
-   ```
+```bash
+# 克隆项目
+git clone https://github.com/candy-frankie/OxQuant.git
+cd OxQuant
 
-2. **Setup with Docker (Recommended)**
-   ```bash
-   # Copy environment file
-   cp .env.example .env
-   
-   # Start database services
-   docker-compose up -d postgres redis
-   
-   # Install Python dependencies
-   pip install -r requirements.txt
-   
-   # Start API server
-   docker-compose up api
-   ```
+# 安装依赖
+./start.sh --install
 
-3. **Or setup locally**
-   ```bash
-   # Run setup script
-   python setup.py
-   
-   # Start services
-   docker-compose up -d
-   ```
+# 本地启动API服务
+./start.sh --local
+```
+
+**Windows用户：**
+```cmd
+start.bat --install
+start.bat --local
+```
+
+### 部署方式对比
+
+| 方式 | 命令 | 说明 |
+|------|------|------|
+| 本地启动 | `./start.sh --local` | 最简单，直接运行（推荐） |
+| Docker简化版 | `./start.sh --docker` | 轻量容器，SQLite数据库 |
+| Docker完整版 | `./start.sh --docker-full` | 完整服务，PostgreSQL+Redis |
+| Jupyter | `./start.sh --jupyter` | 启动研究环境 |
+| 运行测试 | `./start.sh --test` | 执行测试用例 |
+
+### 手动安装
+
+```bash
+# 安装依赖
+pip install -r requirements.slim.txt
+
+# 设置环境变量
+export ENVIRONMENT=development
+export DATABASE_URL=sqlite:///./data/oxquant.db
+
+# 启动API服务
+uvicorn src.api.main:app --host 0.0.0.0 --port 8000
+```
 
 ### Access Services
 - **API Documentation**: http://localhost:8000/docs
 - **Jupyter Notebooks**: http://localhost:8888 (password: oxquant)
-- **PostgreSQL**: localhost:5432 (user: postgres, password: postgres)
-- **Redis**: localhost:6379
+- **PostgreSQL (完整版)**: localhost:5432
+- **Redis (完整版)**: localhost:6379
 
 ## 📁 Project Structure
 ```
@@ -294,3 +306,158 @@ The backtesting engine calculates the following metrics:
 | `expectancy` | Expected value per trade |
 | `risk_reward_ratio` | Average win / average loss |
 | `avg_trade_duration_days` | Average trade holding period |
+
+## 📈 A股市场交易完整链路
+
+OxQuant提供完整的A股交易链路，从数据获取到实盘交易：
+
+```
+数据获取 → 因子挖掘 → 多因子模型 → 策略开发 → 回测分析 → 模拟交易 → 实盘交易 → 风控监控
+     │           │            │            │            │            │            │            │
+  AKShare    QLib思路    IC加权      策略基类    A股专用     实时模拟    同花顺/QMT   VaR/CVaR
+  Tushare    12+因子     回归方法    信号生成    交易规则    历史回放    券商接口    风险告警
+```
+
+### 1. 数据获取
+
+支持AKShare和Tushare两种数据源：
+
+```python
+from src.data.data_providers import data_manager, DataProviderType
+
+# 获取股票价格数据
+data = data_manager.get_price_data(
+    symbol="000001",
+    start_date="20230101",
+    end_date="20231231",
+    provider=DataProviderType.AKSHARE
+)
+
+# 获取指数成分股
+universe = data_manager.get_universe("000300")  # 沪深300
+```
+
+### 2. 因子挖掘（基于QLib框架）
+
+```python
+from src.factors.factor_engine import factor_engine, FactorAnalyzer
+
+# 计算所有因子
+factors = factor_engine.compute_all_factors(data)
+
+# 因子分析
+analyzer = FactorAnalyzer()
+ic = analyzer.calculate_ic(factors['momentum_20'], data['close'].pct_change().shift(-1))
+ir = analyzer.calculate_ic_ir(factors['momentum_20'], data['close'].pct_change().shift(-1))
+
+print(f"IC: {ic:.4f}, IR: {ir:.4f}")
+```
+
+**支持的因子类型：**
+| 因子名称 | 类型 | 描述 |
+|----------|------|------|
+| momentum_20/60/120 | 动量 | 多周期动量因子 |
+| rsi_14 | 动量 | 相对强弱指数 |
+| macd | 动量 | MACD指标 |
+| pe/pb/ps | 估值 | 市盈率/市净率/市销率 |
+| volatility_20/60 | 波动率 | 多周期波动率 |
+| volume_20/turnover_20 | 流动性 | 均量和换手率 |
+| beta/alpha | 风险 | 风险因子 |
+
+### 3. 多因子模型
+
+```python
+from src.factors.multi_factor_model import (
+    MultiFactorModel, FactorCombinationMethod, SignalGenerator
+)
+
+# 创建多因子模型
+model = MultiFactorModel(
+    factors=factors_df,
+    returns=returns_series,
+    method=FactorCombinationMethod.IC_WEIGHTED
+)
+model.fit()
+
+# 生成交易信号
+generator = SignalGenerator(model)
+signals = generator.generate_signals(factors_df, top_n=10)
+```
+
+### 4. A股专用回测
+
+```python
+from src.core.a_stock_backtester import AStockBacktestEngine
+
+backtester = AStockBacktestEngine(
+    initial_capital=1000000,
+    commission=0.0003,
+    slippage=0.0001,
+    stamp_tax=0.001
+)
+
+result = backtester.run(
+    symbols=universe[:20],
+    start_date="20230101",
+    end_date="20231231",
+    strategy_type="multi_factor"
+)
+
+print(result.metrics)
+```
+
+### 5. 模拟交易
+
+```python
+from src.trading.simulation import SimulationEngine, SimulationMode
+
+engine = SimulationEngine(
+    initial_capital=100000,
+    mode=SimulationMode.REALTIME_SIM
+)
+engine.set_strategy(MyStrategy())
+engine.start()
+```
+
+### 6. 实盘交易
+
+```python
+from src.trading.live_trading import LiveTradingEngine, BrokerType
+
+engine = LiveTradingEngine(broker_type=BrokerType.EASYTRADER)
+engine.connect(user="your_user", password="your_password")
+engine.set_strategy(MyStrategy())
+engine.start()
+```
+
+### 7. 风险管理
+
+```python
+from src.risk.risk_management import RiskManager
+
+risk_manager = RiskManager(
+    max_position_size_pct=0.1,
+    max_drawdown_pct=0.1,
+    max_daily_loss_pct=0.05
+)
+
+result = risk_manager.check_all(
+    order_value=150000,
+    portfolio_value=1000000
+)
+```
+
+## 🔧 A股市场配置
+
+### 交易规则
+- **最小交易单位**: 100股（1手）
+- **涨跌幅限制**: ±10%（ST股±5%）
+- **T+1交易**: 当日买入，次日卖出
+- **印花税**: 卖出时收取0.1%
+- **佣金**: 双向收取，约0.03%-0.05%
+- **最低佣金**: 5元/笔
+
+### 交易时间
+- **上午**: 09:30 - 11:30
+- **下午**: 13:00 - 15:00
+- **集合竞价**: 09:15 - 09:25
